@@ -1,0 +1,290 @@
+---
+title: "Racial Bias in CT Police Dataset"
+author: "Yan Qi, Dylan O'Connell"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Abstract
+
+In this paper, our primary goal is to build a model to test whether there are measurable disparities of police officers’ reaction facing violations from difference races. To simplify, our analysis focuses on the probability of a specific stop outcome once a driver is pulled over, as in our opinion there is an opportunity for discrimination once the officer can see the race of the driver. The data used for this analysis was downloaded from the Connecticut Racial Profiling Prohibition Project Data Portal, a database containing drivers’ basic features such as age, sex and race. 
+
+Some descriptive statistic plots were used to get intuitions of the data. After considering a chi-square test model which confirmed our hypothesis, we took a further step to build a multinomial model to quantify the influence of a driver's race. According to the model’s output, we can see that once pulled over for speeding, Black, Hispanic, and Asian drivers were significantly more likely to be given a ticket or an arrest (rather than a warning) when compared to White drivers, even when accounting for a driver's age, gender, and whether contraband was found.
+
+While the dataset does have limitations, for example, the information does not contain detailed descriptions on the interaction between driver and officer, it is difficult reject that this demonstrates racism.
+
+
+## Data 
+
+To determine whether there is measurable racial discrimination, our analysis focuses on the probability of a specific stop outcome once a driver is pulled over. As we are interested in post stop discrimination, we focus on variables that reflect this e.g. `driver_race`, `driver_gender`, `driver_age` and `contraband_found`.
+
+Before any modelling, we removed data with NAs in the stop outcome column, which accounted for less than 2% of the dataset. Although there are 125 categories of violation, we narrow our data to the largest violation group: “Speeding”. This was mainly due to the lack of information from the data source for instance there is no definition of a violation reported as "Lights,Safe movement" or "Other". Although, we also wanted to rule out any subjective reasons for pulling a driver over and thus as "Speeding" has a strong definition this should control for only post stop bias. As a final act of data preparation, we chose to group the stop outcomes into 3 categories: "Warning", "Ticket" and "Arrest/Summons" which represent (23.5%, 70.4% and 6.1% of the data respectively). According to police recrods, there is no specific distinction between giving a written warning or a verbal one, so it makes sense to group them together. It is intuitive to think of the grouped outcomes as different levels of severity: "Warning" being the least severe; "Arrest/Summons" the most severe and "Ticket" being an intermediate punishment.  
+  
+
+```{r,echo=FALSE, include=FALSE}
+# We ensure there are no messages displayed
+# as we run this code
+police.df <- readRDS("CT_police.rds")
+require(xtable)
+require(nnet)
+require(ggplot2)
+```
+
+```{r,echo=FALSE, include=FALSE}
+# We create our new pooled stop_outcome
+police.df$pooled_stop_outcome <- "Ticket"
+police.df$pooled_stop_outcome[police.df$stop_outcome=="Written Warning"
+                              | police.df$stop_outcome==
+                                "Verbal Warning"] <- "Warning"
+police.df$pooled_stop_outcome[police.df$stop_outcome=="Arrest" | 
+                                police.df$stop_outcome=="Summons"] <-
+  "Arrest.Summons"
+# We reorder the factor, we want warning to be the base
+police.df$pooled_stop_outcome <- 
+  factor(police.df$pooled_stop_outcome, 
+         levels=c("Warning", "Ticket", "Arrest.Summons"))
+
+# We reorder the race factor
+police.df$driver_race <- factor(police.df$driver_race,
+                                levels=c("White", "Black",
+                                         "Hispanic", "Asian",
+                                         "Other"))
+police.df <- na.omit(police.df)
+speeding.df <- subset(police.df,
+                      violation=="Speeding")[,
+                                             c("pooled_stop_outcome",
+                                               "driver_race",
+                                               "driver_age",
+                                               "driver_gender",
+                                               "contraband_found")]
+
+```
+
+```{r,echo=FALSE, fig.height = 2.5, fig.width = 6, fig.align = "center"}
+# plot of distribution of outcomes for different races once pulled over
+
+ggplot(speeding.df, aes(x = driver_race, fill = pooled_stop_outcome)) + 
+  geom_bar(position = "fill")
+
+```
+
+        
+In addition to race, other variables we include in our model are age, gender and whether contraband was found, trying to separate the influence of races out as far as possible.
+
+
+## Analysis
+
+We considered a Multinomial Model to address the problem, under the assumption that:
+1.	Observations come from a multinomial distribution 
+2.	Observations are independent, given the covariates
+Due to shared officers, departments and counties in our data, there might be slight violations of independence assumption. While as our primary goal is to detect any evidence of discrimination instead of identify officers with bias, we determined to not include Officer ID in our data.
+
+```{r, echo=FALSE}
+
+speeding.m <- multinom(pooled_stop_outcome ~ driver_race + driver_age  + driver_gender + contraband_found, 
+                    data=speeding.df, trace=FALSE)
+
+speeding.m.base <- multinom(pooled_stop_outcome ~ driver_age +
+                           driver_gender + contraband_found, 
+                         data=speeding.df, trace=FALSE)
+
+
+
+# Used this tip for the p-values  
+# https://stats.stackexchange.com/q/125509
+# We use the ratio of the coefficients to the standard error 
+# and compute their significance using a z-test
+z.speeding <- summary(speeding.m)$coefficients/summary(speeding.m)$standard.errors
+# These are the resulting p-values
+p.speeding <- (1 - pnorm(abs(z.speeding), 0, 1))*2
+
+# These are our coefficients
+#summary(speeding.m)$coefficients
+# These are our standard errors
+#summary(speeding.m)$standard.error
+
+# Generate a latex table for this 
+# xtable(round(cbind(t(coef(speeding.m))[,1], 
+#        t(summary(speeding.m)$standard.error)[,1],
+#       t(p.speeding)[,1],
+#         t(coef(speeding.m))[,2], 
+#       t(summary(speeding.m)$standard.error)[,2],
+#       t(p.speeding)[,2]),3))
+
+```
+
+
+\begin{table}[h]
+\centering
+\caption{Model Coefficients for Speeding Outcome}
+\label{table:speeding }
+\begin{tabular}{r|l|r|r|r|l|r|r|r|}
+\cline{2-9}
+                                                                                 & \textbf{Ticket:} & Coef  & \begin{tabular}[c]{@{}r@{}}Std. \\ Error\end{tabular} & P-Val & \textbf{\begin{tabular}[c]{@{}l@{}}Arrest\\ /Summons\end{tabular}} & Coef  & \begin{tabular}[c]{@{}r@{}}Std. \\ Error\end{tabular} & P-Val \\ \hline
+\multicolumn{1}{|r|}{(Intercept)}                                                &                  & 1.80  & 0.02                                                  & 0.00  &                                                                    & -1.34 & 0.07                                                  & 0.00  \\ \cline{1-1} \cline{3-5} \cline{7-9} 
+\multicolumn{1}{|r|}{Race: Black}                                                &                  & 0.48  & 0.03                                                  & 0.00  &                                                                    & 0.88  & 0.05                                                  & 0.00  \\ \cline{1-1} \cline{3-5} \cline{7-9} 
+\multicolumn{1}{|r|}{Race: Hispanic}                                             &                  & 0.74  & 0.03                                                  & 0.00  &                                                                    & 1.20  & 0.06                                                  & 0.00  \\ \cline{1-1} \cline{3-5} \cline{7-9} 
+\multicolumn{1}{|r|}{Race: Asian}                                                &                  & 1.06  & 0.07                                                  & 0.00  &                                                                    & 0.30  & 0.17                                                  & 0.08  \\ \cline{1-1} \cline{3-5} \cline{7-9} 
+\multicolumn{1}{|r|}{Race: Other}                                                &                  & 0.45  & 0.11                                                  & 0.00  &                                                                    & 0.23  & 0.27                                                  & 0.39  \\ \cline{1-1} \cline{3-5} \cline{7-9} 
+\multicolumn{1}{|r|}{Driver Age}                                                 &                  & -0.02 & 0.00                                                  & 0.00  &                                                                    & -0.04 & 0.00                                                  & 0.00  \\ \cline{1-1} \cline{3-5} \cline{7-9} 
+\multicolumn{1}{|r|}{Gender: Male}                                               &                  & 0.19  & 0.02                                                  & 0.00  &                                                                    & 0.57  & 0.04                                                  & 0.00  \\ \cline{1-1} \cline{3-5} \cline{7-9} 
+\multicolumn{1}{|r|}{\begin{tabular}[c]{@{}r@{}}Contraband\\ Found\end{tabular}} &                  & 1.41  & 0.30                                                  & 0.00  &                                                                    & 3.56  & 0.31                                                  & 0.00  \\ \cline{1-1} \cline{3-5} \cline{7-9} 
+\end{tabular}
+\end{table}
+
+Multinomial models do not lend themselves to precise interpretation as easily as linear or even logistic regession models, however it is still straightforward to formalize what these coefficients mean. The multinomial model asseses the relative pairwise log probability for each outcome of our response variable. Thus, by construction, the base outcome is receiving a Warning. Then, to find this log relative likelihood (between either a Ticket or Arrest/Summons and Warning), we simply compute it using the coefficients for each variable. Note that each factor variable has a base level, so for Race it is White, for Gender it is Female, and for Contraband it is that they did not find any. Then, for any proposed data point which does not correspond to these base levels, we instead would use the corresponding $\beta$ coefficient. Thus, for a driver who is a Hispanic Man, and we are considering the log relative likelihood of him being arrested, we would have $\beta_{\text{Race}} = 1.20$ and $\beta_{\text{Gender}} = 0.57$, while a white woman would have both coefficients be $0$, as they represent the base level. The choice of base level can be arbitrary, it is simply reflected in the intercept term. This allows our model to predict the likelihood of an outcome relative to that of receiving a simple warning, for any given speeding ticket stop.
+
+Each coefficient also has an associated P-value (we use a tip from online to produce an estimate of this). We divide the coefficient by the standard error of the coefficient to get an estimated $z$ statistic. We then compute the corresponding P-value of the significance of this $z$ score (for a two-tailed test). We do not quite have the tools to prove the assumptions required to demonstrate that the coefficient divided by the standard error forms a $z$ score, but online discussion shows that this is a good approximation in practice. Thus, this result allows us to estimate the statistical significance of each P-value.
+
+$$
+\log \left( \frac{\mathbb{P}\{\text{Outcome}\}}{\mathbb{P}\{\text{Warning}\}} \right) = \beta_{\text{(Intercept})} + \text{age}*\beta_{\text{age}} + \beta_{Race} + \beta_{Gender} + \beta_{Contraband} 
+$$
+
+
+In particular, the race coefficients of the model provide significant insight into the relative likelihood for each outcome from a given speeding ticket stop, while already accounting for the effects of the driver's age, sex, and whether they had contraband on them. Undoubtedly, there are some factors that we cannot control for given this limited dataset, but these coefficients provide us with substantial evidence for our more limited question (which considers the outcome of a given traffic stop, and attempts to determine whether race has a statistically significant effect on the outcome). 
+
+We can see that relative to White drivers, Black, Hispanic, and Asian drivers are all more likely to receive a Ticket, and also more likely to receive an arrest/summons (which in turn imiplies they are less likely to get off with just a warning). It is worth noting that this cannot simply be discounted as being because of one race has a higher likelihood of having contraband in their car (which seems to lead to many of the arrests), as the model already accounts for this. 
+
+```{r, echo=FALSE}
+# calculate the prediction differences of each race
+dif.b <- predict(speeding.m, subset(speeding.df, driver_race=="Black"), type="probs")[,1]-
+  predict(speeding.m.base, subset(speeding.df, driver_race=="Black"), type="probs")[,1]
+dif.b <- sort(dif.b)
+
+dif.w <- predict(speeding.m, subset(speeding.df, driver_race=="White"), type="probs")[,1]-
+  predict(speeding.m.base, subset(speeding.df, driver_race=="White"), type="probs")[,1]
+dif.w <- sort(dif.w)
+
+dif.h <- predict(speeding.m, subset(speeding.df, driver_race=="Hispanic"), type="probs")[,1]-
+  predict(speeding.m.base, subset(speeding.df, driver_race=="Hispanic"), type="probs")[,1]
+dif.h <- sort(dif.h)
+
+dif.a <- predict(speeding.m, subset(speeding.df, driver_race=="Asian"), type="probs")[,1]-
+  predict(speeding.m.base, subset(speeding.df, driver_race=="Asian"), type="probs")[,1]
+dif.a <- sort(dif.a)
+
+
+plot(NA, xlim = c(1, 10000), ylim = c(-0.2,0.2), xlab = "Sorted Difference",
+     ylab = "Difference of Predicted Probability", main = "Prediction Difference to get Warning 
+     full model vs. model w/out race" )
+lines(1:10000,dif.w[1:10000] , col = "blue", lwd = 2)
+lines(1:length(dif.b),dif.b , col = "black", lwd = 2)
+lines(1:length(dif.h),dif.h , col = "red", lwd = 2)
+lines(1:length(dif.a),dif.a , col = "orange", lwd = 2)
+# some text labels help clarify things:
+text(800, -0.2, "Asian", col = "orange")
+text(4000, -0.11, "Hispanic", col = "red")
+text(6000, -0.025, "Black", col = "black")
+text(5000, 0.05, "White", col = "blue")
+
+```
+
+
+Additionally, by our calculation of the P-value, each of these results are statistically significant at a very low level. We do not want to take our calculation of the P-value too exactly because, as mentioned, it relies on some assumptions that are difficult to test. However, it a reasonable estimate that the effect sizes are large enough that this is unlikely to be due to chance. We note the one race related coefficient that does not prove to be statistically significant is that for race "Other" for Arrest/Summons. This is due to the smaller sample size of that category, but it is worth noting that this hardly counts against any evidence of bias, as "Other" is specifically hard to categorize, and our analysis focuses on easily recognizeable races.
+
+This dataset is too limited to allow us to delve into the nature of the cause of this relationship. However, it does let us simply answer the more narrow question that once pulled over for speeding, Black, Hispanic, and Asian drivers were significantly more likely to be given a ticket or an arrest (rather than a warning) when compared to White drivers, even when accounting for a driver's age, gender, and whether contraband was found. 
+
+As the information does not contain detailed descriptions on the interaction between driver and officer it is difficult to take this evidence of racism. 
+
+# Code Appendix
+
+## Code: Data Cleaning
+```{r, eval=FALSE}
+# We create our new pooled stop_outcome
+police.df$pooled_stop_outcome <- "Ticket"
+police.df$pooled_stop_outcome[police.df$stop_outcome=="Written Warning"
+                              | police.df$stop_outcome==
+                                "Verbal Warning"] <- "Warning"
+police.df$pooled_stop_outcome[police.df$stop_outcome=="Arrest" | 
+                                police.df$stop_outcome=="Summons"] <-
+  "Arrest.Summons"
+# We reorder the factor, we want warning to be the base
+police.df$pooled_stop_outcome <- 
+  factor(police.df$pooled_stop_outcome, 
+         levels=c("Warning", "Ticket", "Arrest.Summons"))
+
+# We reorder the race factor
+police.df$driver_race <- factor(police.df$driver_race,
+                                levels=c("White", "Black",
+                                         "Hispanic", "Asian",
+                                         "Other"))
+
+
+police.df <- na.omit(police.df)
+speeding.df <- subset(police.df,
+                      violation=="Speeding")[,
+                                             c("pooled_stop_outcome",
+                                               "driver_race",
+                                               "driver_age",
+                                               "driver_gender",
+                                               "contraband_found")]
+
+```
+
+
+## Code: Analysis
+
+```{r, eval=FALSE}
+require(nnet)
+speeding.m <- multinom(pooled_stop_outcome ~ driver_race + driver_age  + driver_gender + contraband_found, 
+                    data=speeding.df, trace=FALSE)
+
+speeding.m.base <- multinom(pooled_stop_outcome ~ driver_age +
+                           driver_gender + contraband_found, 
+                         data=speeding.df, trace=FALSE)
+
+
+# Used this tip for the p-values  
+# https://stats.stackexchange.com/q/125509
+# We use the ratio of the coefficients to the standard error 
+# and compute their significance using a z-test
+z.speeding <- summary(speeding.m)$coefficients/summary(speeding.m)$standard.errors
+# These are the resulting p-values
+p.speeding <- (1 - pnorm(abs(z.speeding), 0, 1))*2
+
+# These are our coefficients
+summary(speeding.m)$coefficients
+# These are our standard errors
+summary(speeding.m)$standard.error
+
+```
+
+```{r, eval=FALSE}
+# calculate the prediction differences of each race and visualize
+dif.b <- predict(speeding.m, subset(speeding.df, driver_race=="Black"), type="probs")[,1]-
+  predict(speeding.m.base, subset(speeding.df, driver_race=="Black"), type="probs")[,1]
+dif.b <- sort(dif.b)
+
+dif.w <- predict(speeding.m, subset(speeding.df, driver_race=="White"), type="probs")[,1]-
+  predict(speeding.m.base, subset(speeding.df, driver_race=="White"), type="probs")[,1]
+dif.w <- sort(dif.w)
+
+dif.h <- predict(speeding.m, subset(speeding.df, driver_race=="Hispanic"), type="probs")[,1]-
+  predict(speeding.m.base, subset(speeding.df, driver_race=="Hispanic"), type="probs")[,1]
+dif.h <- sort(dif.h)
+
+dif.a <- predict(speeding.m, subset(speeding.df, driver_race=="Asian"), type="probs")[,1]-
+  predict(speeding.m.base, subset(speeding.df, driver_race=="Asian"), type="probs")[,1]
+dif.a <- sort(dif.a)
+
+
+plot(NA, xlim = c(1, 10000), ylim = c(-0.2,0.2), xlab = "Sorted Difference",
+     ylab = "Difference of Predicted Probability", main = "Prediction Difference to get Warning 
+     full model vs. model w/out race" )
+lines(1:10000,dif.w[1:10000] , col = "blue", lwd = 2)
+lines(1:length(dif.b),dif.b , col = "black", lwd = 2)
+lines(1:length(dif.h),dif.h , col = "red", lwd = 2)
+lines(1:length(dif.a),dif.a , col = "orange", lwd = 2)
+# some text labels help clarify things:
+text(800, -0.2, "Asian", col = "orange")
+text(4000, -0.11, "Hispanic", col = "red")
+text(6000, -0.025, "Black", col = "black")
+text(5000, 0.05, "White", col = "blue")
+
+```
+
