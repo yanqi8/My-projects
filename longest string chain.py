@@ -1,6 +1,8 @@
 w = [ "a",  "b",  "ba", "bca", "bda", "bdca" ]
 
+
 def find_next_chain(word, words):
+# for any string, find the descendants if any
     chains = set()
     for i in range(len(word)):
         current_word = word[:i] + word[i+1:]
@@ -10,6 +12,7 @@ def find_next_chain(word, words):
 
 
 def max_chain(word, words):
+# for any string, compute the length of longest chain
     current_chain = find_next_chain(word, words)
     chain_length = 1
 
@@ -23,6 +26,7 @@ def max_chain(word, words):
     return chain_length
 
 def get_max_chain(words):
+# get the max number of chain length for all elements in words
     chain_lengths = []
     for i in words:
         chain_lengths.append(max_chain(i, words))
