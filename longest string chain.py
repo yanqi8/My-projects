@@ -12,7 +12,7 @@ def find_next_chain(word, words):
 def max_chain(word, words):
     current_chain = find_next_chain(word, words)
     chain_length = 1
-    
+
     while len(current_chain) != 0:
         chain_length = chain_length + 1
         next = set()
