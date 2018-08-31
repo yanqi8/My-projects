@@ -1,4 +1,4 @@
 
 Sample Project and Code.
-More Completed Library please see:
+More Completed Library/API please see:
 https://github.com/yaesoubilab/SimPy
