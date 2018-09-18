@@ -1,4 +1,8 @@
 
 Sample Project and Code.
-More Completed Library/API please see:
+
+Completed Library/API built during RA at Yale:
 https://github.com/yaesoubilab/SimPy
+
+Deep Learning Project:
+https://github.com/yanqi8/deep-learning-project
